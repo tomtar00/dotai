@@ -1,6 +1,6 @@
 [package]
 name = "dotai"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Generate AGENTS.md and Claude, Cursor, and OpenCode config from a single .ai/ source directory"
 license = "MIT"

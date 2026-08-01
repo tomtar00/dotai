@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::{config, template, util};
 
 pub enum NewKind {
-    Agent(String),
+    Agent(String, String, String),
     Skill(String),
     Command(String),
     Rule(String),
@@ -14,11 +14,18 @@ pub enum NewKind {
 pub fn run(kind: Option<NewKind>) -> Result<()> {
     match kind {
         None => bootstrap(),
-        Some(NewKind::Agent(name)) => create_item("agents", "agent", &name),
-        Some(NewKind::Skill(name)) => create_item("skills", "skill", &name),
-        Some(NewKind::Command(name)) => create_item("commands", "command", &name),
-        Some(NewKind::Rule(name)) => create_item("rules", "rule", &name),
-        Some(NewKind::Ai) => create_ai_md(),
+        Some(kind) => {
+            config::ensure_default()?;
+            match kind {
+                NewKind::Agent(name, model, effort) => {
+                    create_item("agents", "agent", &name, Some(&model), Some(&effort))
+                }
+                NewKind::Skill(name) => create_item("skills", "skill", &name, None, None),
+                NewKind::Command(name) => create_item("commands", "command", &name, None, None),
+                NewKind::Rule(name) => create_item("rules", "rule", &name, None, None),
+                NewKind::Ai => create_ai_md(),
+            }
+        }
     }
 }
 
@@ -35,7 +42,7 @@ pub fn bootstrap() -> Result<()> {
 
     if config::ensure_default()? {
         println!(
-            "Created {} with default providers",
+            "Created {} with default providers and models",
             config::path().display()
         );
     }
@@ -53,14 +60,20 @@ fn ensure_ai() -> Result<()> {
     Ok(())
 }
 
-fn create_item(dir: &str, kind: &str, name: &str) -> Result<()> {
+fn create_item(
+    dir: &str,
+    kind: &str,
+    name: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<()> {
     ensure_ai()?;
     validate_name(name)?;
     let path = PathBuf::from(".ai").join(dir).join(format!("{}.md", name));
     if path.exists() {
         anyhow::bail!("{} '{}' already exists at {}", kind, name, path.display());
     }
-    util::write(&path, &template::scaffold(dir, name)?)?;
+    util::write(&path, &template::scaffold(dir, name, model, effort)?)?;
     println!("Created {} '{}' at {}", kind, name, path.display());
     Ok(())
 }

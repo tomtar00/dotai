@@ -20,6 +20,7 @@ pub struct Agent {
     pub name: String,
     pub description: String,
     pub model: Option<String>,
+    pub effort: Option<String>,
     pub temperature: Option<f64>,
     pub mode: Option<String>,
     pub tools: Vec<String>,

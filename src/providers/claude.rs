@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
+use crate::config::Config;
 use crate::model::Project;
-use crate::providers::{self, Provider};
+use crate::providers::{self, GenStats, Provider};
+use crate::state::Manifest;
 use crate::translate::{self, tool_to_claude};
 
 pub struct Claude;
@@ -13,15 +14,28 @@ impl Provider for Claude {
         "claude"
     }
 
-    fn generate(&self, project: &Project, _ai_dir: &Path) -> Result<()> {
+    fn generate(
+        &self,
+        project: &Project,
+        _ai_dir: &Path,
+        config: &Config,
+        manifest: &mut Manifest,
+        force: bool,
+    ) -> Result<GenStats> {
         let out = std::path::PathBuf::from(".claude");
         std::fs::create_dir_all(&out)
             .with_context(|| format!("Failed to create {}", out.display()))?;
 
+        let mut stats = GenStats::default();
+
         if project.ai_md.is_some() {
-            let mut content = providers::GENERATED.to_string();
-            content.push_str("\n@../AGENTS.md\n");
-            crate::util::write(&out.join("CLAUDE.md"), &content)?;
+            let outcome = providers::write_with_manifest(
+                manifest,
+                &out.join("CLAUDE.md"),
+                "@../AGENTS.md\n",
+                force,
+            )?;
+            stats.count(outcome);
         }
 
         let mut removed = 0;
@@ -37,15 +51,18 @@ impl Provider for Claude {
                 if !rule.globs.is_empty() {
                     meta.push(("globs", format!("\"{}\"", rule.globs.join(", "))));
                 }
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &rules_dir.join(format!("{}.md", rule.name)),
                     &meta,
                     &rule.body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_rules += 1;
             }
         }
-        removed += providers::remove_stale_files(&rules_dir, ".md", &rule_names)?;
+        removed += providers::remove_stale_files(manifest, &rules_dir, ".md", &rule_names)?;
 
         let mut n_agents = 0;
         let agent_names: Vec<String> = project.agents.iter().map(|a| a.name.clone()).collect();
@@ -71,19 +88,30 @@ impl Provider for Claude {
                     }
                 }
                 if let Some(model) = &agent.model {
-                    meta.push(("model".to_string(), translate::strip_provider_prefix(model)));
+                    if let Some(resolved) = providers::resolve_model(config, "claude", model) {
+                        meta.push((
+                            "model".to_string(),
+                            translate::strip_provider_prefix(&resolved),
+                        ));
+                    }
+                }
+                if let Some(effort) = &agent.effort {
+                    meta.push(("effort".to_string(), effort.clone()));
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &agents_dir.join(format!("{}.md", agent.name)),
                     &meta,
                     &agent.body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_agents += 1;
             }
         }
-        removed += providers::remove_stale_files(&agents_dir, ".md", &agent_names)?;
+        removed += providers::remove_stale_files(manifest, &agents_dir, ".md", &agent_names)?;
 
         let mut n_skills = 0;
         let skill_names: Vec<String> = project.skills.iter().map(|s| s.name.clone()).collect();
@@ -110,11 +138,12 @@ impl Provider for Claude {
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_skill(&skills_dir, skill, &meta)?;
+                let outcome = providers::write_skill(manifest, &skills_dir, skill, &meta, force)?;
+                stats.count(outcome);
                 n_skills += 1;
             }
         }
-        removed += providers::remove_stale_skills(&skills_dir, &skill_names)?;
+        removed += providers::remove_stale_skills(manifest, &skills_dir, &skill_names)?;
 
         let mut n_commands = 0;
         let command_names: Vec<String> = project.commands.iter().map(|c| c.name.clone()).collect();
@@ -138,36 +167,31 @@ impl Provider for Claude {
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
                 let body =
                     translate::translate_command_vars(&cmd.body, translate::VarStyle::Dollar);
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &commands_dir.join(format!("{}.md", cmd.name)),
                     &meta,
                     &body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_commands += 1;
             }
         }
-        removed += providers::remove_stale_files(&commands_dir, ".md", &command_names)?;
+        removed += providers::remove_stale_files(manifest, &commands_dir, ".md", &command_names)?;
 
         providers::summary(".claude", n_rules, n_agents, n_skills, n_commands, removed);
-        Ok(())
+        Ok(stats)
     }
 
-    fn cleanup(&self) -> Result<usize> {
+    fn cleanup(&self, manifest: &mut Manifest) -> Result<usize> {
         let out = std::path::PathBuf::from(".claude");
         let mut removed = 0;
-        let claude_md = out.join("CLAUDE.md");
-        if claude_md.exists() {
-            let content = fs::read_to_string(&claude_md).unwrap_or_default();
-            if providers::is_generated(&content) {
-                fs::remove_file(&claude_md)
-                    .with_context(|| format!("Failed to remove {}", claude_md.display()))?;
-                removed += 1;
-            }
-        }
-        removed += providers::remove_stale_files(&out.join("rules"), ".md", &[])?;
-        removed += providers::remove_stale_files(&out.join("agents"), ".md", &[])?;
-        removed += providers::remove_stale_skills(&out.join("skills"), &[])?;
-        removed += providers::remove_stale_files(&out.join("commands"), ".md", &[])?;
+        removed += providers::remove_file_if_owned(manifest, &out.join("CLAUDE.md"))?;
+        removed += providers::remove_stale_files(manifest, &out.join("rules"), ".md", &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("agents"), ".md", &[])?;
+        removed += providers::remove_stale_skills(manifest, &out.join("skills"), &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("commands"), ".md", &[])?;
         providers::remove_empty(&out);
         Ok(removed)
     }

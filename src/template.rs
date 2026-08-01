@@ -34,6 +34,8 @@ formats (`.claude/rules/`, `.cursor/rules/`). Create them with
 pub const AGENT_SCAFFOLD: &str = r#"---
 description: One sentence on when to delegate to this agent.
 tools: read, grep, glob, list
+model: {model}
+effort: {effort}
 ---
 
 You are {name}. Describe your role, behavior, and output format here.
@@ -91,7 +93,12 @@ pub fn ensure_template() -> Result<std::path::PathBuf> {
     Ok(t)
 }
 
-pub fn scaffold(kind: &str, name: &str) -> Result<String> {
+pub fn scaffold(
+    kind: &str,
+    name: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<String> {
     let override_path = util::template_dir().join(kind).join(".scaffold.md");
     let content = if override_path.exists() {
         fs::read_to_string(&override_path)
@@ -105,5 +112,8 @@ pub fn scaffold(kind: &str, name: &str) -> Result<String> {
             _ => anyhow::bail!("unknown scaffold kind: {}", kind),
         }
     };
-    Ok(content.replace("{name}", name))
+    Ok(content
+        .replace("{name}", name)
+        .replace("{model}", model.unwrap_or("medium"))
+        .replace("{effort}", effort.unwrap_or("medium")))
 }

@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::config::Config;
 use crate::model::Project;
-use crate::providers::{self, Provider};
+use crate::providers::{self, GenStats, Provider};
+use crate::state::Manifest;
 use crate::translate;
 
 pub struct Cursor;
@@ -12,11 +14,19 @@ impl Provider for Cursor {
         "cursor"
     }
 
-    fn generate(&self, project: &Project, _ai_dir: &Path) -> Result<()> {
+    fn generate(
+        &self,
+        project: &Project,
+        _ai_dir: &Path,
+        config: &Config,
+        manifest: &mut Manifest,
+        force: bool,
+    ) -> Result<GenStats> {
         let out = std::path::PathBuf::from(".cursor");
         std::fs::create_dir_all(&out)
             .with_context(|| format!("Failed to create {}", out.display()))?;
 
+        let mut stats = GenStats::default();
         let mut removed = 0;
 
         let mut n_rules = 0;
@@ -38,15 +48,18 @@ impl Provider for Cursor {
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &rules_dir.join(format!("{}.mdc", rule.name)),
                     &meta,
                     &rule.body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_rules += 1;
             }
         }
-        removed += providers::remove_stale_files(&rules_dir, ".mdc", &rule_names)?;
+        removed += providers::remove_stale_files(manifest, &rules_dir, ".mdc", &rule_names)?;
 
         let mut n_agents = 0;
         let agent_names: Vec<String> = project.agents.iter().map(|a| a.name.clone()).collect();
@@ -60,7 +73,15 @@ impl Provider for Cursor {
                     ("description".to_string(), agent.description.clone()),
                 ];
                 if let Some(model) = &agent.model {
-                    meta.push(("model".to_string(), model.clone()));
+                    if let Some(resolved) = providers::resolve_model(config, "cursor", model) {
+                        let model_str = match &agent.effort {
+                            Some(effort) if !resolved.contains('[') => {
+                                format!("{}[effort={}]", resolved, effort)
+                            }
+                            _ => resolved,
+                        };
+                        meta.push(("model".to_string(), model_str));
+                    }
                 }
                 if !agent.tools.is_empty()
                     && agent.tools.iter().all(|t| translate::is_readonly_tool(t))
@@ -69,15 +90,18 @@ impl Provider for Cursor {
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &agents_dir.join(format!("{}.md", agent.name)),
                     &meta,
                     &agent.body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_agents += 1;
             }
         }
-        removed += providers::remove_stale_files(&agents_dir, ".md", &agent_names)?;
+        removed += providers::remove_stale_files(manifest, &agents_dir, ".md", &agent_names)?;
 
         let mut n_skills = 0;
         let skill_names: Vec<String> = project.skills.iter().map(|s| s.name.clone()).collect();
@@ -95,11 +119,12 @@ impl Provider for Cursor {
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_skill(&skills_dir, skill, &meta)?;
+                let outcome = providers::write_skill(manifest, &skills_dir, skill, &meta, force)?;
+                stats.count(outcome);
                 n_skills += 1;
             }
         }
-        removed += providers::remove_stale_skills(&skills_dir, &skill_names)?;
+        removed += providers::remove_stale_skills(manifest, &skills_dir, &skill_names)?;
 
         let mut n_commands = 0;
         let command_names: Vec<String> = project.commands.iter().map(|c| c.name.clone()).collect();
@@ -108,29 +133,31 @@ impl Provider for Cursor {
             std::fs::create_dir_all(&commands_dir)
                 .with_context(|| format!("Failed to create {}", commands_dir.display()))?;
             for cmd in &project.commands {
-                let mut content = providers::GENERATED.to_string();
-                content.push_str(&translate::translate_command_vars(
-                    &cmd.body,
-                    translate::VarStyle::Keep,
-                ));
-                content.push('\n');
-                crate::util::write(&commands_dir.join(format!("{}.md", cmd.name)), &content)?;
+                let content =
+                    translate::translate_command_vars(&cmd.body, translate::VarStyle::Keep);
+                let outcome = providers::write_with_manifest(
+                    manifest,
+                    &commands_dir.join(format!("{}.md", cmd.name)),
+                    &format!("{}\n", content),
+                    force,
+                )?;
+                stats.count(outcome);
                 n_commands += 1;
             }
         }
-        removed += providers::remove_stale_files(&commands_dir, ".md", &command_names)?;
+        removed += providers::remove_stale_files(manifest, &commands_dir, ".md", &command_names)?;
 
         providers::summary(".cursor", n_rules, n_agents, n_skills, n_commands, removed);
-        Ok(())
+        Ok(stats)
     }
 
-    fn cleanup(&self) -> Result<usize> {
+    fn cleanup(&self, manifest: &mut Manifest) -> Result<usize> {
         let out = std::path::PathBuf::from(".cursor");
         let mut removed = 0;
-        removed += providers::remove_stale_files(&out.join("rules"), ".mdc", &[])?;
-        removed += providers::remove_stale_files(&out.join("agents"), ".md", &[])?;
-        removed += providers::remove_stale_skills(&out.join("skills"), &[])?;
-        removed += providers::remove_stale_files(&out.join("commands"), ".md", &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("rules"), ".mdc", &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("agents"), ".md", &[])?;
+        removed += providers::remove_stale_skills(manifest, &out.join("skills"), &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("commands"), ".md", &[])?;
         providers::remove_empty(&out);
         Ok(removed)
     }

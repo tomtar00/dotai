@@ -103,6 +103,12 @@ impl TestEnv {
         std::fs::write(path, content).unwrap();
     }
 
+    fn write_home(&self, rel: &str, content: &str) {
+        let path = self.home().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
     fn remove(&self, rel: &str) {
         std::fs::remove_file(self.path(rel)).unwrap();
     }
@@ -143,6 +149,11 @@ fn new_bootstraps_template_and_config() {
     for provider in ["claude", "opencode", "cursor"] {
         assert!(config.contains(provider), "config missing {}", provider);
     }
+    assert!(
+        config.contains("\"models\""),
+        "config missing models: {}",
+        config
+    );
 
     let providers = env.stdout(&["providers"]);
     assert!(providers.contains("claude, opencode, cursor"));
@@ -187,7 +198,7 @@ fn new_scaffolds_items_and_validates_names() {
 }
 
 #[test]
-fn gen_errors_are_helpful() {
+fn gen_requires_ai_dir_and_creates_config() {
     let env = TestEnv::new();
     env.fails(
         &["gen", "claude"],
@@ -195,7 +206,11 @@ fn gen_errors_are_helpful() {
     );
 
     env.write(".ai/AI.md", "# Project\n");
-    env.fails(&["gen"], "Create it with a \"providers\" list");
+    env.ok(&["gen"]); // no config -> auto-created defaults
+    assert!(
+        env.home().join(".config/dotai/dotai.json").exists(),
+        "gen must create the default config"
+    );
     env.fails(
         &["gen", "bogus"],
         "unknown provider 'bogus'. Known providers: claude, cursor, opencode",
@@ -575,4 +590,282 @@ fn count_files(dir: &Path) -> usize {
         }
     }
     count
+}
+
+fn walk_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                out.extend(walk_files(&entry.path()));
+            } else {
+                out.push(entry.path());
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn gen_auto_creates_default_config() {
+    let env = TestEnv::new();
+    env.write(".ai/AI.md", "# Project\n");
+    env.write(
+        ".ai/agents/code-review.md",
+        "---\ndescription: Reviews.\n---\nBody.\n",
+    );
+
+    env.ok(&["gen"]);
+
+    let config = std::fs::read_to_string(env.home().join(".config/dotai/dotai.json")).unwrap();
+    assert!(config.contains("\"models\""), "missing models: {}", config);
+    assert!(
+        config.contains("claude-opus-5"),
+        "missing new models: {}",
+        config
+    );
+    assert!(
+        config.contains("anthropic/claude-sonnet-5"),
+        "missing prefixed models: {}",
+        config
+    );
+    assert!(env.exists(".claude/agents/code-review.md"));
+    assert!(env.exists("AGENTS.md"));
+}
+
+#[test]
+fn preexisting_files_are_never_overwritten() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write(
+        ".claude/agents/code-review.md",
+        "# MY OWN AGENT\ncustom content\n",
+    );
+    env.write(
+        ".ai/agents/code-review.md",
+        "---\ndescription: Mine.\n---\nBody.\n",
+    );
+
+    env.ok(&["gen", "claude"]);
+    assert_eq!(
+        env.read(".claude/agents/code-review.md"),
+        "# MY OWN AGENT\ncustom content\n",
+        "pre-existing file must never be overwritten"
+    );
+    let out = env.stdout(&["gen", "claude"]);
+    assert!(
+        out.contains("pre-existing"),
+        "gen should warn about skipped files: {}",
+        out
+    );
+
+    env.ok(&["gen", "claude", "--force"]);
+    let agent = env.read(".claude/agents/code-review.md");
+    assert!(agent.contains("Body."), "--force must overwrite: {}", agent);
+    assert!(agent.contains("name: code-review"));
+}
+
+#[test]
+fn gen_updates_only_changed_files() {
+    let env = TestEnv::new();
+    env.setup_full();
+    env.ok(&["gen", "claude", "opencode", "cursor"]);
+    let skill_before = env.read(".claude/skills/summarize/SKILL.md");
+    assert!(skill_before.contains("summarize"));
+
+    env.write(".claude/agents/code-review.md", "HAND EDIT\n");
+    env.ok(&["gen", "claude", "opencode", "cursor"]);
+    assert_eq!(
+        env.read(".claude/agents/code-review.md"),
+        "HAND EDIT\n",
+        "hand edit must survive when the .ai source is unchanged"
+    );
+    assert_eq!(
+        env.read(".claude/skills/summarize/SKILL.md"),
+        skill_before,
+        "unchanged items must not be rewritten"
+    );
+
+    env.write(
+        ".ai/agents/code-review.md",
+        "---\ndescription: New.\n---\nNew body.\n",
+    );
+    env.ok(&["gen", "claude"]);
+    let agent = env.read(".claude/agents/code-review.md");
+    assert!(agent.contains("New body."), "source change must regenerate");
+    assert!(!agent.contains("HAND EDIT"));
+
+    let manifest = env.read(".ai/manifest.json");
+    assert!(
+        manifest.contains(".claude/agents/code-review.md"),
+        "manifest must track generated files: {}",
+        manifest
+    );
+}
+
+#[test]
+fn agent_model_and_effort_map_per_provider() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.ok(&[
+        "new", "agent", "reviewer", "--model", "large", "--effort", "xhigh",
+    ]);
+    env.ok(&["new", "agent", "writer"]);
+
+    let reviewer = env.read(".ai/agents/reviewer.md");
+    assert!(reviewer.contains("model: large"), "{}", reviewer);
+    assert!(reviewer.contains("effort: xhigh"), "{}", reviewer);
+    let writer = env.read(".ai/agents/writer.md");
+    assert!(writer.contains("model: medium"), "{}", writer);
+    assert!(writer.contains("effort: medium"), "{}", writer);
+
+    assert!(!env
+        .run(&["new", "agent", "bad", "--model", "huge"])
+        .status
+        .success());
+    assert!(!env
+        .run(&["new", "agent", "bad", "--effort", "extreme"])
+        .status
+        .success());
+
+    env.ok(&["gen", "claude", "opencode", "cursor"]);
+
+    let claude_reviewer = env.read(".claude/agents/reviewer.md");
+    assert!(
+        claude_reviewer.contains("model: claude-opus-5"),
+        "{}",
+        claude_reviewer
+    );
+    assert!(
+        claude_reviewer.contains("effort: xhigh"),
+        "{}",
+        claude_reviewer
+    );
+    let opencode_reviewer = env.read(".opencode/agents/reviewer.md");
+    assert!(opencode_reviewer.contains("model: anthropic/claude-opus-5"));
+    assert!(opencode_reviewer.contains("reasoningEffort: xhigh"));
+    let cursor_reviewer = env.read(".cursor/agents/reviewer.md");
+    assert!(
+        cursor_reviewer.contains("model: claude-opus-5[effort=xhigh]"),
+        "{}",
+        cursor_reviewer
+    );
+
+    let claude_writer = env.read(".claude/agents/writer.md");
+    assert!(
+        claude_writer.contains("model: claude-sonnet-5"),
+        "{}",
+        claude_writer
+    );
+    assert!(claude_writer.contains("effort: medium"));
+    let opencode_writer = env.read(".opencode/agents/writer.md");
+    assert!(opencode_writer.contains("reasoningEffort: medium"));
+    let cursor_writer = env.read(".cursor/agents/writer.md");
+    assert!(cursor_writer.contains("model: claude-sonnet-5[effort=medium]"));
+
+    env.write_home(
+        ".config/dotai/dotai.json",
+        r#"{"providers": ["claude"], "models": {"claude": {"medium": "my-medium-model"}}}"#,
+    );
+    env.ok(&["gen", "claude"]);
+    let writer = env.read(".claude/agents/writer.md");
+    assert!(writer.contains("model: my-medium-model"), "{}", writer);
+    assert!(writer.contains("effort: medium"));
+}
+
+#[test]
+fn config_without_models_still_loads() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write_home(".config/dotai/dotai.json", r#"{"providers": ["claude"]}"#);
+    env.ok(&["new", "agent", "foo"]);
+    env.ok(&["gen"]);
+    let agent = env.read(".claude/agents/foo.md");
+    assert!(
+        !agent.contains("model:"),
+        "unmapped level must not emit a model: {}",
+        agent
+    );
+    assert!(agent.contains("effort: medium"), "{}", agent);
+}
+
+#[test]
+fn generated_files_have_no_marker() {
+    let env = TestEnv::new();
+    env.setup_full();
+    env.ok(&["gen", "claude", "opencode", "cursor"]);
+    for path in walk_files(&env.path("")) {
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            !content.contains("Generated by dotai"),
+            "{} still carries the marker",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn migrates_legacy_marker_files() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write(
+        ".ai/agents/code-review.md",
+        "---\ndescription: Mine.\n---\nBody.\n",
+    );
+    let legacy = "<!-- Generated by dotai from .ai/. Do not edit. Run `dotai gen` to regenerate. -->\n---\nname: code-review\ndescription: Mine.\n---\nBody.\n";
+    env.write(".claude/agents/code-review.md", legacy);
+    env.write(
+        ".claude/commands/old.md",
+        "<!-- Generated by dotai from .ai/. Do not edit. Run `dotai gen` to regenerate. -->\nold\n",
+    );
+
+    env.ok(&["gen", "claude"]);
+
+    let adopted = env.read(".claude/agents/code-review.md");
+    assert!(
+        !adopted.contains("Generated by dotai"),
+        "adopted file must be marker-free: {}",
+        adopted
+    );
+    assert!(adopted.contains("Body."));
+    assert!(
+        !env.exists(".claude/commands/old.md"),
+        "orphan legacy file must be removed"
+    );
+
+    env.write(
+        ".ai/agents/code-review.md",
+        "---\ndescription: Mine.\n---\nBody 2.\n",
+    );
+    env.ok(&["gen", "claude"]);
+    assert!(
+        env.read(".claude/agents/code-review.md")
+            .contains("Body 2."),
+        "adopted file must be managed going forward"
+    );
+
+    let out = env.run_stdin(&["clear"], "y\n");
+    assert!(out.status.success());
+    assert!(!env.exists(".claude/agents/code-review.md"));
+}
+
+#[test]
+fn clear_resets_manifest() {
+    let env = TestEnv::new();
+    env.setup_full();
+    env.ok(&["gen", "claude", "opencode", "cursor"]);
+    assert!(env.exists(".ai/manifest.json"));
+
+    let out = env.run_stdin(&["clear"], "y\n");
+    assert!(out.status.success());
+
+    let manifest = std::fs::read_to_string(env.path(".ai/manifest.json")).unwrap();
+    assert!(
+        manifest.contains("\"files\": {}"),
+        "manifest must be empty after clear: {}",
+        manifest
+    );
+
+    env.ok(&["gen", "claude"]);
+    assert!(env.exists(".claude/agents/code-review.md"));
 }

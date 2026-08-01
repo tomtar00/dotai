@@ -36,6 +36,7 @@ pub fn load(ai_dir: &Path) -> Result<Project> {
         name,
         description: frontmatter::get_str(&meta, "description").unwrap_or_default(),
         model: frontmatter::get_str(&meta, "model"),
+        effort: frontmatter::get_str(&meta, "effort"),
         temperature: meta
             .get(serde_yaml::Value::String("temperature".to_string()))
             .and_then(|v| v.as_f64()),

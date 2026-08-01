@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::config::Config;
 use crate::model::Project;
-use crate::providers::{self, Provider};
+use crate::providers::{self, GenStats, Provider};
+use crate::state::Manifest;
 use crate::translate;
 
 pub struct OpenCode;
@@ -12,11 +14,19 @@ impl Provider for OpenCode {
         "opencode"
     }
 
-    fn generate(&self, project: &Project, _ai_dir: &Path) -> Result<()> {
+    fn generate(
+        &self,
+        project: &Project,
+        _ai_dir: &Path,
+        config: &Config,
+        manifest: &mut Manifest,
+        force: bool,
+    ) -> Result<GenStats> {
         let out = std::path::PathBuf::from(".opencode");
         std::fs::create_dir_all(&out)
             .with_context(|| format!("Failed to create {}", out.display()))?;
 
+        let mut stats = GenStats::default();
         let mut removed = 0;
 
         let mut n_agents = 0;
@@ -35,9 +45,14 @@ impl Provider for OpenCode {
                     agent.mode.clone().unwrap_or_else(|| "subagent".to_string()),
                 ));
                 if let Some(model) = &agent.model {
-                    if model != "inherit" {
-                        meta.push(("model".to_string(), model.clone()));
+                    if let Some(resolved) = providers::resolve_model(config, "opencode", model) {
+                        if resolved != "inherit" {
+                            meta.push(("model".to_string(), resolved));
+                        }
                     }
+                }
+                if let Some(effort) = &agent.effort {
+                    meta.push(("reasoningEffort".to_string(), effort.clone()));
                 }
                 if let Some(temp) = &agent.temperature {
                     meta.push(("temperature".to_string(), temp.to_string()));
@@ -52,15 +67,18 @@ impl Provider for OpenCode {
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &agents_dir.join(format!("{}.md", agent.name)),
                     &meta,
                     &agent.body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_agents += 1;
             }
         }
-        removed += providers::remove_stale_files(&agents_dir, ".md", &agent_names)?;
+        removed += providers::remove_stale_files(manifest, &agents_dir, ".md", &agent_names)?;
 
         let mut n_skills = 0;
         let skill_names: Vec<String> = project.skills.iter().map(|s| s.name.clone()).collect();
@@ -73,11 +91,12 @@ impl Provider for OpenCode {
                     ("name", skill.name.clone()),
                     ("description", skill.description.clone()),
                 ];
-                providers::write_skill(&skills_dir, skill, &meta)?;
+                let outcome = providers::write_skill(manifest, &skills_dir, skill, &meta, force)?;
+                stats.count(outcome);
                 n_skills += 1;
             }
         }
-        removed += providers::remove_stale_skills(&skills_dir, &skill_names)?;
+        removed += providers::remove_stale_skills(manifest, &skills_dir, &skill_names)?;
 
         let mut n_commands = 0;
         let command_names: Vec<String> = project.commands.iter().map(|c| c.name.clone()).collect();
@@ -97,30 +116,33 @@ impl Provider for OpenCode {
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
                 let body =
                     translate::translate_command_vars(&cmd.body, translate::VarStyle::OpenCode);
-                providers::write_md_with_fm(
+                let outcome = providers::write_md_with_fm(
+                    manifest,
                     &commands_dir.join(format!("{}.md", cmd.name)),
                     &meta,
                     &body,
+                    force,
                 )?;
+                stats.count(outcome);
                 n_commands += 1;
             }
         }
-        removed += providers::remove_stale_files(&commands_dir, ".md", &command_names)?;
+        removed += providers::remove_stale_files(manifest, &commands_dir, ".md", &command_names)?;
 
         if !project.rules.is_empty() {
             println!("  .opencode: rules skipped (opencode has no rules directory; use AI.md)");
         }
 
         providers::summary(".opencode", 0, n_agents, n_skills, n_commands, removed);
-        Ok(())
+        Ok(stats)
     }
 
-    fn cleanup(&self) -> Result<usize> {
+    fn cleanup(&self, manifest: &mut Manifest) -> Result<usize> {
         let out = std::path::PathBuf::from(".opencode");
         let mut removed = 0;
-        removed += providers::remove_stale_files(&out.join("agents"), ".md", &[])?;
-        removed += providers::remove_stale_skills(&out.join("skills"), &[])?;
-        removed += providers::remove_stale_files(&out.join("commands"), ".md", &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("agents"), ".md", &[])?;
+        removed += providers::remove_stale_skills(manifest, &out.join("skills"), &[])?;
+        removed += providers::remove_stale_files(manifest, &out.join("commands"), ".md", &[])?;
         providers::remove_empty(&out);
         Ok(removed)
     }

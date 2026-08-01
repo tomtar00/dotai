@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 mod ai_dir;
 mod commands;
@@ -6,6 +6,7 @@ mod config;
 mod frontmatter;
 mod model;
 mod providers;
+mod state;
 mod template;
 mod translate;
 mod util;
@@ -39,12 +40,64 @@ struct NewArgs {
     kind: Option<NewKind>,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum ModelLevel {
+    Small,
+    Medium,
+    Large,
+}
+
+impl ModelLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            ModelLevel::Small => "small",
+            ModelLevel::Medium => "medium",
+            ModelLevel::Large => "large",
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum EffortLevel {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl EffortLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            EffortLevel::Low => "low",
+            EffortLevel::Medium => "medium",
+            EffortLevel::High => "high",
+            EffortLevel::Xhigh => "xhigh",
+            EffortLevel::Max => "max",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum NewKind {
     #[command(about = "Create a new agent in .ai/agents/")]
     Agent {
         #[arg(value_name = "NAME")]
         name: String,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ModelLevel::Medium,
+            help = "Model size: small, medium or large (mapped per provider in dotai.json)"
+        )]
+        model: ModelLevel,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = EffortLevel::Medium,
+            help = "Reasoning effort: low, medium, high, xhigh or max"
+        )]
+        effort: EffortLevel,
     },
     #[command(about = "Create a new skill in .ai/skills/")]
     Skill {
@@ -72,6 +125,8 @@ struct GenArgs {
         help = "Providers to generate (default: from ~/.config/dotai/dotai.json)"
     )]
     providers: Vec<String>,
+    #[arg(long, help = "Overwrite files that existed before dotai managed them")]
+    force: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -79,7 +134,15 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::New(args) => {
             let kind = args.kind.map(|k| match k {
-                NewKind::Agent { name } => commands::new_cmd::NewKind::Agent(name),
+                NewKind::Agent {
+                    name,
+                    model,
+                    effort,
+                } => commands::new_cmd::NewKind::Agent(
+                    name,
+                    model.as_str().to_string(),
+                    effort.as_str().to_string(),
+                ),
                 NewKind::Skill { name } => commands::new_cmd::NewKind::Skill(name),
                 NewKind::Command { name } => commands::new_cmd::NewKind::Command(name),
                 NewKind::Rule { name } => commands::new_cmd::NewKind::Rule(name),
@@ -87,7 +150,7 @@ fn main() -> anyhow::Result<()> {
             });
             commands::new_cmd::run(kind)?;
         }
-        Commands::Gen(args) => commands::gen_cmd::run(args.providers)?,
+        Commands::Gen(args) => commands::gen_cmd::run(args.providers, args.force)?,
         Commands::Clear => commands::clear_cmd::run()?,
         Commands::Providers => {
             println!(

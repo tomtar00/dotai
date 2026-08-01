@@ -29,15 +29,16 @@ command.
 
 ## Install
 
-Requires Rust (cargo). The simple way — works on all OSes, installs to
-`~/.cargo/bin` (already on your PATH with rustup):
+Published on [crates.io](https://crates.io/crates/dotai). Requires Rust
+(cargo); installs to `~/.cargo/bin` (already on your PATH with rustup):
 
 ```sh
-cargo install --path .
+cargo install dotai
 ```
 
-Custom location: `cargo install --path . --root ~/.local` (installs to
-`~/.local/bin`). Or use the helper scripts, which also check PATH:
+Building from source: `cargo install --path .`. Custom location:
+`cargo install --path . --root ~/.local` (installs to `~/.local/bin`). Or use
+the helper scripts, which also check PATH:
 
 | OS | Command |
 | --- | --- |

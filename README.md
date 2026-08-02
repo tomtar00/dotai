@@ -16,15 +16,29 @@ Published on [crates.io](https://crates.io/crates/dotai). Requires Rust.
 
 ```sh
 dotai new                        # create .ai/ from your template
-dotai new agent code-review      # scaffold an agent
-dotai new agent architect --model large --effort xhigh
+dotai new agent code-review      # interactive wizard for the rest
+dotai new agent architect --model large --effort xhigh   # flags skip prompts
 dotai gen                        # generate AGENTS.md, .claude/, .cursor/, .opencode/
 dotai gen --force                # overwrite files that existed before dotai
 dotai clear                      # remove everything dotai generated
+dotai config                     # edit dotai.json in $DOTAI_EDITOR / $VISUAL / $EDITOR / vi
 ```
 
 Edit files in `.ai/` and run `dotai gen` again — only changed files are
 updated, and files that pre-date dotai are never touched.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `dotai new` | Create `.ai/` from your template |
+| `dotai new agent\|skill\|command\|rule [name]` | Scaffold an item; prompts for anything not given as a flag (`Enter` = default, empty on optional fields omits them) |
+| `dotai new agent\|skill\|command\|rule help` | Print the frontmatter reference for that kind (nothing is created) |
+| `dotai gen [providers...]` | Generate configs from `.ai/` (default: providers in dotai.json) |
+| `dotai gen --force` | Overwrite files that existed before dotai managed them |
+| `dotai providers` | List available and configured providers |
+| `dotai clear` | Remove AGENTS.md and everything dotai generated |
+| `dotai config` | Open dotai.json in `$DOTAI_EDITOR`, `$VISUAL`, `$EDITOR`, or `vi`/`notepad` |
 
 ## Layout
 
@@ -40,11 +54,13 @@ updated, and files that pre-date dotai are never touched.
 
 Agent frontmatter: `model: small|medium|large` and
 `effort: low|medium|high|xhigh|max` (or a full model name like `gpt-5`, used
-as-is).
+as-is), plus `allow:` and `deny:` tool lists — e.g.
+`allow: read, grep, glob, list` and `deny: edit`. Run
+`dotai new agent help` for the full reference of every kind.
 
 ## Config
 
-`~/.config/dotai/dotai.json` is auto-created and editable:
+`~/.config/dotai/dotai.json` is auto-created and editable (`dotai config`):
 
 ```json
 {

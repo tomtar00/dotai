@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.4.0] - 2026-08-02
+
+### Added
+
+- `dotai new <kind> help` — prints the frontmatter parameter reference for
+  agents, skills, commands or rules without creating anything. `dotai new
+  help` lists the kinds. `help` is a reserved item name.
+- Interactive wizard: `dotai new` commands now prompt for missing parameters,
+  showing defaults in brackets (Enter accepts). Prompts are skipped for
+  parameters already passed as flags, and empty input or closed stdin falls
+  back to defaults, so scripts keep working. The item name is prompted when
+  omitted.
+- `dotai config` — opens `~/.config/dotai/dotai.json` (creating it first) in
+  `$DOTAI_EDITOR`, falling back to `$VISUAL`, `$EDITOR`, then `vi` (or
+  `notepad` on Windows).
+
+### Changed
+
+- Agent frontmatter: `tools:` is replaced by `allow:` plus a new `deny:` list.
+  Skills use `allow:` instead of `allowed-tools:`. The old keys are still
+  read for compatibility.
+- Provider emission: Claude Code gets `tools:` from `allow` and
+  `disallowed-tools:` from `deny`; opencode gets a `permission:` map built
+  from both; Cursor gets `readonly: true` when `edit` is denied.
+- New agents scaffold with `allow: read, grep, glob, list`; model and effort
+  are written to frontmatter by the wizard instead of baked into the
+  scaffold.
+
+### Migration
+
+- Existing `.ai/` files using `tools:` or `allowed-tools:` keep working and
+  are treated as `allow` lists.
+
 ## [0.3.0] - 2026-08-01
 
 ### Changed

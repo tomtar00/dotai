@@ -57,13 +57,17 @@ impl Provider for OpenCode {
                 if let Some(temp) = &agent.temperature {
                     meta.push(("temperature".to_string(), temp.to_string()));
                 }
-                if !agent.tools.is_empty()
-                    && agent.tools.iter().all(|t| translate::is_readonly_tool(t))
-                {
-                    meta.push((
-                        "permission".to_string(),
-                        "\n  edit: deny\n  bash: deny".to_string(),
-                    ));
+                if !agent.allow.is_empty() || !agent.deny.is_empty() {
+                    let mut rules = Vec::new();
+                    for tool in providers::dedupe(agent.allow.clone()) {
+                        rules.push(format!("  {}: allow", tool));
+                    }
+                    for tool in providers::dedupe(agent.deny.clone()) {
+                        rules.push(format!("  {}: deny", tool));
+                    }
+                    if !rules.is_empty() {
+                        meta.push(("permission".to_string(), format!("\n{}", rules.join("\n"))));
+                    }
                 }
                 let meta: Vec<(&str, String)> =
                     meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();

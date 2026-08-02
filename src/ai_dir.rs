@@ -41,7 +41,8 @@ pub fn load(ai_dir: &Path) -> Result<Project> {
             .get(serde_yaml::Value::String("temperature".to_string()))
             .and_then(|v| v.as_f64()),
         mode: frontmatter::get_str(&meta, "mode"),
-        tools: frontmatter::get_list(&meta, "tools"),
+        allow: allow_list(&meta, "allow", "tools"),
+        deny: frontmatter::get_list(&meta, "deny"),
         body,
     })?;
 
@@ -95,6 +96,15 @@ fn load_dir_files<T>(
     Ok(items)
 }
 
+fn allow_list(meta: &serde_yaml::Mapping, new_key: &str, old_key: &str) -> Vec<String> {
+    let list = frontmatter::get_list(meta, new_key);
+    if !list.is_empty() {
+        list
+    } else {
+        frontmatter::get_list(meta, old_key)
+    }
+}
+
 fn load_skills(dir: &Path) -> Result<Vec<Skill>> {
     if !dir.exists() {
         return Ok(Vec::new());
@@ -124,7 +134,7 @@ fn load_skills(dir: &Path) -> Result<Vec<Skill>> {
             skills.push(Skill {
                 name: name.clone(),
                 description: frontmatter::get_str(&parsed.meta, "description").unwrap_or_default(),
-                allowed_tools: frontmatter::get_list(&parsed.meta, "allowed-tools"),
+                allow: allow_list(&parsed.meta, "allow", "allowed-tools"),
                 paths: frontmatter::get_list(&parsed.meta, "paths"),
                 body: parsed.body,
                 src_dir: Some(path),
@@ -141,7 +151,7 @@ fn load_skills(dir: &Path) -> Result<Vec<Skill>> {
                     .to_string_lossy()
                     .to_string(),
                 description: frontmatter::get_str(&parsed.meta, "description").unwrap_or_default(),
-                allowed_tools: frontmatter::get_list(&parsed.meta, "allowed-tools"),
+                allow: allow_list(&parsed.meta, "allow", "allowed-tools"),
                 paths: frontmatter::get_list(&parsed.meta, "paths"),
                 body: parsed.body,
                 src_dir: None,

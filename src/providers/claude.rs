@@ -75,16 +75,31 @@ impl Provider for Claude {
                     ("name".to_string(), agent.name.clone()),
                     ("description".to_string(), agent.description.clone()),
                 ];
-                if !agent.tools.is_empty() {
+                if !agent.allow.is_empty() {
                     let tools: Vec<String> = providers::dedupe(
                         agent
-                            .tools
+                            .allow
                             .iter()
                             .filter_map(|t| tool_to_claude(t))
                             .collect(),
                     );
                     if !tools.is_empty() {
                         meta.push(("tools".to_string(), providers::comma_list(&tools)));
+                    }
+                }
+                if !agent.deny.is_empty() {
+                    let tools: Vec<String> = providers::dedupe(
+                        agent
+                            .deny
+                            .iter()
+                            .filter_map(|t| tool_to_claude(t))
+                            .collect(),
+                    );
+                    if !tools.is_empty() {
+                        meta.push((
+                            "disallowed-tools".to_string(),
+                            providers::comma_list(&tools),
+                        ));
                     }
                 }
                 if let Some(model) = &agent.model {
@@ -124,10 +139,10 @@ impl Provider for Claude {
                     ("name".to_string(), skill.name.clone()),
                     ("description".to_string(), skill.description.clone()),
                 ];
-                if !skill.allowed_tools.is_empty() {
+                if !skill.allow.is_empty() {
                     let tools: Vec<String> = providers::dedupe(
                         skill
-                            .allowed_tools
+                            .allow
                             .iter()
                             .filter_map(|t| tool_to_claude(t))
                             .collect(),

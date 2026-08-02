@@ -21,13 +21,6 @@ pub fn tool_to_claude(tool: &str) -> Option<String> {
     }
 }
 
-pub fn is_readonly_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "read" | "grep" | "glob" | "list" | "webfetch" | "websearch"
-    )
-}
-
 pub fn translate_command_vars(body: &str, style: VarStyle) -> String {
     let chars: Vec<char> = body.chars().collect();
     let mut out = String::with_capacity(body.len());

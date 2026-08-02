@@ -83,9 +83,7 @@ impl Provider for Cursor {
                         meta.push(("model".to_string(), model_str));
                     }
                 }
-                if !agent.tools.is_empty()
-                    && agent.tools.iter().all(|t| translate::is_readonly_tool(t))
-                {
+                if agent.deny.iter().any(|t| t == "edit") {
                     meta.push(("readonly".to_string(), "true".to_string()));
                 }
                 let meta: Vec<(&str, String)> =

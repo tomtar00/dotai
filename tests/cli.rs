@@ -55,6 +55,17 @@ impl TestEnv {
         child.wait_with_output().unwrap()
     }
 
+    fn run_with(&self, args: &[&str], envs: &[(&str, &str)]) -> Output {
+        let mut cmd = Command::new(BIN);
+        cmd.args(args)
+            .env("HOME", self.home())
+            .current_dir(self.proj());
+        for (key, value) in envs {
+            cmd.env(key, value);
+        }
+        cmd.output().unwrap()
+    }
+
     fn ok(&self, args: &[&str]) {
         let out = self.run(args);
         assert!(
@@ -177,7 +188,7 @@ fn new_scaffolds_items_and_validates_names() {
         agent.contains("description:"),
         "agent scaffold missing description"
     );
-    assert!(agent.contains("tools: read, grep, glob, list"));
+    assert!(agent.contains("allow: read, grep, glob, list"));
     assert!(
         agent.contains("code-review"),
         "scaffold name not substituted"
@@ -188,13 +199,162 @@ fn new_scaffolds_items_and_validates_names() {
     let command = env.read(".ai/commands/release.md");
     assert!(command.contains("argument-hint:"));
     let rule = env.read(".ai/rules/commit-style.md");
-    assert!(rule.contains("globs:"));
+    assert!(rule.contains("description: What this rule covers."));
 
     env.fails(&["new", "rule", "commit-style"], "already exists");
     env.fails(&["new", "agent", "Bad Name"], "invalid name");
     env.fails(&["new", "agent", "bad_name"], "invalid name");
     env.fails(&["new", "agent", "con"], "invalid name");
     env.fails(&["new", "agent", "COM1"], "invalid name");
+}
+
+#[test]
+fn new_kind_help_prints_reference_without_side_effects() {
+    let env = TestEnv::new();
+    for (kind, expected) in [
+        ("agent", "Agent frontmatter"),
+        ("skill", "Skill frontmatter"),
+        ("command", "Command frontmatter"),
+        ("rule", "Rule frontmatter"),
+    ] {
+        let out = env.stdout(&["new", kind, "help"]);
+        assert!(out.contains(expected), "{} help missing {}", kind, expected);
+    }
+    assert!(!env.exists(".ai"), "help must not bootstrap .ai");
+    assert!(
+        !env.home().join(".config/dotai/dotai.json").exists(),
+        "help must not create the config"
+    );
+
+    let overview = env.stdout(&["new", "help"]);
+    assert!(overview.contains("Kinds:"), "overview: {}", overview);
+    assert!(
+        overview.contains("agent"),
+        "overview must list kinds: {}",
+        overview
+    );
+
+    let unknown = env.stdout(&["new", "help", "bogus"]);
+    assert!(unknown.contains("Unknown kind"));
+}
+
+#[test]
+fn wizard_prompts_and_writes_all_values() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    let out = env.run_stdin(
+        &["new", "agent", "wiz-agt"],
+        "A smart reviewer.\nlarge\nhigh\n0.5\nprimary\nread, bash\nedit\n",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let agent = env.read(".ai/agents/wiz-agt.md");
+    assert!(
+        agent.contains("description: A smart reviewer."),
+        "{}",
+        agent
+    );
+    assert!(agent.contains("model: large"), "{}", agent);
+    assert!(agent.contains("effort: high"), "{}", agent);
+    assert!(agent.contains("temperature: 0.5"), "{}", agent);
+    assert!(agent.contains("mode: primary"), "{}", agent);
+    assert!(agent.contains("allow: read, bash"), "{}", agent);
+    assert!(agent.contains("deny: edit"), "{}", agent);
+}
+
+#[test]
+fn wizard_defaults_on_empty_and_eof() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+
+    let out = env.run_stdin(&["new", "agent", "eof-agt"], "");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let agent = env.read(".ai/agents/eof-agt.md");
+    assert!(
+        agent.contains("description: One sentence on when to delegate to this agent."),
+        "{}",
+        agent
+    );
+    assert!(agent.contains("model: medium"), "{}", agent);
+    assert!(agent.contains("effort: medium"), "{}", agent);
+    assert!(agent.contains("mode: subagent"), "{}", agent);
+    assert!(agent.contains("allow: read, grep, glob, list"), "{}", agent);
+    assert!(!agent.contains("temperature:"), "{}", agent);
+    assert!(!agent.contains("deny:"), "{}", agent);
+
+    let out = env.run_stdin(&["new", "agent", "empty-agt"], "\n\n\n\n\n\n\n");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let agent = env.read(".ai/agents/empty-agt.md");
+    assert!(agent.contains("model: medium"), "{}", agent);
+    assert!(!agent.contains("temperature:"), "{}", agent);
+    assert!(!agent.contains("deny:"), "{}", agent);
+}
+
+#[test]
+fn wizard_flags_skip_prompts_and_name_is_prompted() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    let out = env.run_stdin(
+        &["new", "agent", "--model", "large", "--effort", "xhigh"],
+        "named-agent\nDescription here.\n0.2\n\nread, bash\n\n",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let agent = env.read(".ai/agents/named-agent.md");
+    assert!(agent.contains("model: large"), "{}", agent);
+    assert!(agent.contains("effort: xhigh"), "{}", agent);
+    assert!(
+        agent.contains("description: Description here."),
+        "{}",
+        agent
+    );
+    assert!(agent.contains("temperature: 0.2"), "{}", agent);
+    assert!(agent.contains("mode: subagent"), "{}", agent);
+    assert!(agent.contains("allow: read, bash"), "{}", agent);
+    assert!(!agent.contains("deny:"), "{}", agent);
+}
+
+#[test]
+fn config_command_opens_editor_and_creates_config() {
+    let env = TestEnv::new();
+    let out = env.run_with(&["config"], &[("DOTAI_EDITOR", "echo edited")]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("edited"),
+        "editor must be invoked with the config path"
+    );
+    let config_path = env.home().join(".config/dotai/dotai.json");
+    assert!(config_path.exists(), "config must be created");
+    let config = std::fs::read_to_string(config_path).unwrap();
+    assert!(config.contains("\"providers\""), "{}", config);
+}
+
+#[test]
+fn config_command_fails_when_editor_fails() {
+    let env = TestEnv::new();
+    let out = env.run_with(&["config"], &[("DOTAI_EDITOR", "false")]);
+    assert!(
+        !out.status.success(),
+        "non-zero editor exit must fail the command"
+    );
 }
 
 #[test]
@@ -223,7 +383,7 @@ fn gen_writes_correct_provider_syntax() {
     env.ok(&["new"]);
     env.write(
         ".ai/agents/code-review.md",
-        "---\ndescription: Reviews code.\ntools: read, grep, glob, list\n---\nReview carefully.\n",
+        "---\ndescription: Reviews code.\nallow: read, grep, glob, list\ndeny: edit, bash\n---\nReview carefully.\n",
     );
     env.write(
         ".ai/agents/impl.md",
@@ -259,6 +419,10 @@ fn gen_writes_correct_provider_syntax() {
         claude_agent.contains("tools: Read, Grep, Glob"),
         "claude tools must be Title-cased and deduped"
     );
+    assert!(
+        claude_agent.contains("disallowed-tools: Edit, Bash"),
+        "claude deny must map to disallowed-tools"
+    );
 
     let claude_impl = env.read(".claude/agents/impl.md");
     assert!(
@@ -289,6 +453,7 @@ fn gen_writes_correct_provider_syntax() {
     assert!(opencode_agent.contains("mode: subagent"));
     assert!(opencode_agent.contains("permission:"));
     assert!(opencode_agent.contains("edit: deny"));
+    assert!(opencode_agent.contains("bash: deny"));
 
     let opencode_impl = env.read(".opencode/agents/impl.md");
     assert!(
@@ -296,8 +461,9 @@ fn gen_writes_correct_provider_syntax() {
         "opencode model keeps provider prefix"
     );
     assert!(
-        !opencode_impl.contains("permission:"),
-        "non-readonly agent must not get permission deny"
+        opencode_impl.contains("bash: allow"),
+        "opencode allow list must map to permission entries: {}",
+        opencode_impl
     );
 
     let opencode_cmd = env.read(".opencode/commands/release.md");
@@ -572,9 +738,11 @@ fn custom_scaffold_override() {
     std::fs::write(&template, "CUSTOM AGENT: {name}\n").unwrap();
 
     env.ok(&["new", "agent", "custom-one"]);
-    assert_eq!(
-        env.read(".ai/agents/custom-one.md"),
-        "CUSTOM AGENT: custom-one\n"
+    let content = env.read(".ai/agents/custom-one.md");
+    assert!(
+        content.contains("CUSTOM AGENT: custom-one"),
+        "override scaffold must be used: {}",
+        content
     );
 }
 

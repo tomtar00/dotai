@@ -22,6 +22,7 @@ dotai gen                        # generate AGENTS.md, .claude/, .cursor/, .open
 dotai gen --force                # overwrite files that existed before dotai
 dotai clear                      # remove everything dotai generated
 dotai config                     # edit dotai.json in $DOTAI_EDITOR / $VISUAL / $EDITOR / vi
+dotai verify                     # check syntax of everything in .ai/
 ```
 
 Edit files in `.ai/` and run `dotai gen` again — only changed files are
@@ -39,6 +40,7 @@ updated, and files that pre-date dotai are never touched.
 | `dotai providers` | List available and configured providers |
 | `dotai clear` | Remove AGENTS.md and everything dotai generated |
 | `dotai config` | Open dotai.json in `$DOTAI_EDITOR`, `$VISUAL`, `$EDITOR`, or `vi`/`notepad` |
+| `dotai verify` | Check syntax of all agent, skill, command and rule files in `.ai/`; exits non-zero on problems |
 
 ## Layout
 

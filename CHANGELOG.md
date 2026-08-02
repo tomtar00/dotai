@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] - 2026-08-02
+
+### Added
+
+- `dotai verify` — checks the syntax of every agent, skill, command and rule
+  file in `.ai/`: frontmatter must parse as YAML, item names must be valid,
+  `model`/`effort`/`mode` values must be valid, `temperature` must be a
+  number, `always-apply` a boolean, and `description`/body must be non-empty.
+  Skill directories without a `SKILL.md` are flagged. Every problem is
+  listed with its file, and the command exits non-zero when anything fails
+  (prints `Verified N files in .ai: all OK` when clean).
+- `dotai verify` flags unknown frontmatter keys (such as the pre-0.4.0
+  `tools:` / `allowed-tools:`) and, whenever problems are found, prints a
+  hint pointing at `dotai new <kind> help` for the available parameters.
+  The old keys still work in `dotai gen` as a migration fallback.
+
 ## [0.4.0] - 2026-08-02
 
 ### Added

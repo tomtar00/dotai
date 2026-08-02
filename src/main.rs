@@ -38,6 +38,8 @@ enum Commands {
     Clear,
     #[command(about = "Open dotai.json in your editor")]
     Config,
+    #[command(about = "Check syntax of agent, skill, command and rule files in .ai/")]
+    Verify,
 }
 
 #[derive(Args)]
@@ -163,6 +165,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Gen(args) => commands::gen_cmd::run(args.providers, args.force)?,
         Commands::Clear => commands::clear_cmd::run()?,
         Commands::Config => commands::config_cmd::run()?,
+        Commands::Verify => commands::verify_cmd::run()?,
         Commands::Providers => {
             println!(
                 "Available providers: {}",

@@ -85,7 +85,7 @@ fn wizard_agent(name: Option<String>, model: Option<String>, effort: Option<Stri
     let mut w = Wizard::new();
     let name = match name {
         Some(name) => {
-            validate_name(&name)?;
+            util::validate_name(&name)?;
             name
         }
         None => w.ask_name()?,
@@ -141,7 +141,7 @@ fn wizard_skill(name: Option<String>) -> Result<()> {
     let mut w = Wizard::new();
     let name = match name {
         Some(name) => {
-            validate_name(&name)?;
+            util::validate_name(&name)?;
             name
         }
         None => w.ask_name()?,
@@ -171,7 +171,7 @@ fn wizard_command(name: Option<String>) -> Result<()> {
     let mut w = Wizard::new();
     let name = match name {
         Some(name) => {
-            validate_name(&name)?;
+            util::validate_name(&name)?;
             name
         }
         None => w.ask_name()?,
@@ -201,7 +201,7 @@ fn wizard_rule(name: Option<String>) -> Result<()> {
     let mut w = Wizard::new();
     let name = match name {
         Some(name) => {
-            validate_name(&name)?;
+            util::validate_name(&name)?;
             name
         }
         None => w.ask_name()?,
@@ -272,7 +272,7 @@ impl Wizard {
         loop {
             match self.ask("name", None) {
                 None => anyhow::bail!("name required (stdin closed)"),
-                Some(name) if validate_name(&name).is_ok() => return Ok(name),
+                Some(name) if util::validate_name(&name).is_ok() => return Ok(name),
                 Some(_) => {
                     println!(
                         "invalid name: use lowercase letters, digits and hyphens (e.g. code-review)"
@@ -305,7 +305,7 @@ impl Wizard {
 
 fn write_item(dir: &str, kind: &str, name: &str, pairs: &[(String, String)]) -> Result<()> {
     ensure_ai()?;
-    validate_name(name)?;
+    util::validate_name(name)?;
     let path = PathBuf::from(".ai").join(dir).join(format!("{}.md", name));
     if path.exists() {
         anyhow::bail!("{} '{}' already exists at {}", kind, name, path.display());
@@ -354,26 +354,5 @@ fn create_ai_md() -> Result<()> {
     }
     util::write(&path, template::DEFAULT_AI_MD)?;
     println!("Created {}", path.display());
-    Ok(())
-}
-
-fn validate_name(name: &str) -> Result<()> {
-    const RESERVED: &[&str] = &[
-        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-    ];
-    let ok = !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !name.starts_with('-')
-        && !name.ends_with('-')
-        && !RESERVED.contains(&name);
-    if !ok {
-        anyhow::bail!(
-            "invalid name '{}': use lowercase letters, digits and hyphens (e.g. code-review)",
-            name
-        );
-    }
     Ok(())
 }

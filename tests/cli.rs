@@ -358,6 +358,118 @@ fn config_command_fails_when_editor_fails() {
 }
 
 #[test]
+fn verify_requires_ai_dir() {
+    let env = TestEnv::new();
+    env.fails(&["verify"], ".ai directory does not exist");
+}
+
+#[test]
+fn verify_reports_clean_dir() {
+    let env = TestEnv::new();
+    env.setup_full();
+    let out = env.stdout(&["verify"]);
+    assert!(out.contains("all OK"), "{}", out);
+    assert!(
+        !env.exists(".ai/manifest.json"),
+        "verify must not create a manifest"
+    );
+}
+
+#[test]
+fn verify_catches_problems() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write(
+        ".ai/agents/bad_name.md",
+        "---\ndescription: X.\neffort: extreme\n---\nBody.\n",
+    );
+    env.write(".ai/agents/nofm.md", "No frontmatter here.\n");
+    env.write(".ai/commands/empty.md", "---\ndescription:\n---\n\n");
+    env.write(
+        ".ai/rules/badbool.md",
+        "---\ndescription: X.\nalways-apply: maybe\n---\nBody.\n",
+    );
+    env.write(".ai/skills/orphan/placeholder.txt", "x\n");
+
+    let out = env.run(&["verify"]);
+    assert!(
+        !out.status.success(),
+        "verify must exit non-zero on problems"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("bad_name"), "name: {}", stderr);
+    assert!(
+        stderr.contains("effort must be one of"),
+        "effort: {}",
+        stderr
+    );
+    assert!(stderr.contains("missing frontmatter"), "fm: {}", stderr);
+    assert!(stderr.contains("description"), "description: {}", stderr);
+    assert!(stderr.contains("empty body"), "body: {}", stderr);
+    assert!(stderr.contains("always-apply"), "always-apply: {}", stderr);
+    assert!(stderr.contains("missing SKILL.md"), "skill: {}", stderr);
+    assert!(stderr.contains("8 problems found"), "summary: {}", stderr);
+}
+
+#[test]
+fn verify_reports_unparseable_frontmatter() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write(
+        ".ai/rules/bad.md",
+        "---\ndescription: X.\nglobs: [unclosed\n---\nBody.\n",
+    );
+    let out = env.run(&["verify"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to parse YAML frontmatter"),
+        "{}",
+        stderr
+    );
+}
+
+#[test]
+fn verify_flags_unknown_keys_and_suggests_help() {
+    let env = TestEnv::new();
+    env.ok(&["new"]);
+    env.write(
+        ".ai/agents/old.md",
+        "---\ndescription: X.\ntools: read, grep\n---\nBody.\n",
+    );
+    env.write(
+        ".ai/skills/oldy/SKILL.md",
+        "---\ndescription: X.\nallowed-tools: read\n---\nBody.\n",
+    );
+
+    let out = env.run(&["verify"]);
+    assert!(!out.status.success(), "unknown keys must fail verification");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown frontmatter key `tools`"),
+        "{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("unknown frontmatter key `allowed-tools`"),
+        "{}",
+        stderr
+    );
+    assert!(stderr.contains("2 problems found"), "{}", stderr);
+    assert!(
+        stderr.contains("hint: run `dotai new agent help`"),
+        "{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("hint: run `dotai new skill help`"),
+        "{}",
+        stderr
+    );
+    assert!(!stderr.contains("deprecated"), "{}", stderr);
+}
+
+#[test]
 fn gen_requires_ai_dir_and_creates_config() {
     let env = TestEnv::new();
     env.fails(

@@ -48,3 +48,24 @@ pub fn write(path: &Path, content: &str) -> Result<()> {
     }
     fs::write(path, content).with_context(|| format!("Failed to write {}", path.display()))
 }
+
+pub fn validate_name(name: &str) -> Result<()> {
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    let ok = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !RESERVED.contains(&name);
+    if !ok {
+        anyhow::bail!(
+            "invalid name '{}': use lowercase letters, digits and hyphens (e.g. code-review)",
+            name
+        );
+    }
+    Ok(())
+}
